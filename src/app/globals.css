@@ -138,10 +138,76 @@ a {
   line-height: 1.65;
 }
 
+.google-button {
+  display: flex;
+  width: 100%;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  margin-top: 25px;
+  border: 1px solid #dfe3e9;
+  border-radius: 8px;
+  background: #fff;
+  color: #354052;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.google-button:hover:not(:disabled) {
+  border-color: #cbd1da;
+  background: #fafbfc;
+  box-shadow: 0 2px 6px rgb(34 43 63 / 5%);
+}
+
+.google-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.google-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.google-loading-dot {
+  width: 15px;
+  height: 15px;
+  border: 2px solid #d8dbe2;
+  border-top-color: #5549df;
+  border-radius: 50%;
+  animation: google-spin 700ms linear infinite;
+}
+
+@keyframes google-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-top: 23px;
+  color: #9aa2af;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.login-divider span:first-child,
+.login-divider span:last-child {
+  height: 1px;
+  flex: 1;
+  background: #e9ecf1;
+}
+
 .login-form {
   display: flex;
   flex-direction: column;
-  margin-top: 30px;
+  margin-top: 20px;
 }
 
 .login-form label {

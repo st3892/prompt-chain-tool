@@ -15,6 +15,23 @@ existing Supabase Auth account. Accounts without `is_superadmin = true` are
 sent to the Access Denied page. The dashboard's Log out button ends the
 Supabase session.
 
+## Google OAuth configuration
+
+Enable Google as a provider in Supabase Authentication and configure the
+provider's Google OAuth client credentials. In Supabase Authentication URL
+Configuration, add these application callback URLs to the allowed redirect
+URLs:
+
+- `http://localhost:3000/auth/callback`
+- `https://YOUR-VERCEL-DOMAIN/auth/callback`
+
+Replace `YOUR-VERCEL-DOMAIN` with the deployed Vercel hostname (and add any
+custom production domain callback URL if one is used). The Google OAuth
+provider's authorized redirect URI in Google Cloud must be the Supabase
+project's callback URL shown in the Supabase Google provider settings,
+typically `https://YOUR-PROJECT-REF.supabase.co/auth/v1/callback`. This is
+different from the application callback URLs above.
+
 ## Supabase access requirements
 
 The app uses the existing `NEXT_PUBLIC_SUPABASE_URL` and
