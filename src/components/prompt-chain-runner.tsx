@@ -33,14 +33,10 @@ export function PromptChainRunner({
   const router = useRouter();
   const imageRequired = chainName.trim().toLowerCase() === "funny image captions";
   const submitting = useRef(false);
-  const testingModel = useRef(false);
   const activeRun = useRef<AbortController | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [isTestingModel, setIsTestingModel] = useState(false);
   const [progress, setProgress] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [modelTestMessage, setModelTestMessage] = useState("");
-  const [modelTestError, setModelTestError] = useState(false);
   const [outputs, setOutputs] = useState<StepOutput[]>([]);
   const [isComplete, setIsComplete] = useState(false);
 
@@ -136,61 +132,6 @@ export function PromptChainRunner({
     activeRun.current?.abort();
   }
 
-  async function handleTestModel() {
-    if (testingModel.current || submitting.current) return;
-    testingModel.current = true;
-    setIsTestingModel(true);
-    setModelTestMessage("");
-    setModelTestError(false);
-    try {
-      const response = await fetch(`/api/chains/${chainId}/test-model`, {
-        method: "POST",
-      });
-      const result = (await response.json()) as {
-        ok?: boolean;
-        status?: number;
-        category?: string;
-        model?: string;
-        message?: string;
-        diagnostic?: {
-          modelKeyType?: string;
-          modelKeyLength?: number | null;
-          escapedModelKey?: string;
-          stepLlmModelId?: string;
-          modelRowId?: string;
-        };
-      };
-      if (!response.ok) {
-        const status = result.status ?? response.status;
-        const category = result.category ?? "unknown";
-        const message = result.message ?? "Model access could not be verified.";
-        const diagnostic = result.diagnostic;
-        setModelTestError(true);
-        setModelTestMessage(
-          `Gemini test failed${result.model ? ` for "${result.model}"` : ""} (HTTP ${status}, ${category}): ${message}${
-            diagnostic
-              ? ` Stored model_key: type=${diagnostic.modelKeyType ?? "unknown"}, length=${diagnostic.modelKeyLength ?? "unknown"}, value=${diagnostic.escapedModelKey ?? "unavailable"}; step llm_model_id=${diagnostic.stepLlmModelId ?? "unknown"}, fetched model row id=${diagnostic.modelRowId ?? "unknown"}.`
-              : ""
-          }`,
-        );
-        return;
-      }
-      setModelTestMessage(result.message ?? "Model access test completed.");
-    } catch (error) {
-      setModelTestError(true);
-      setModelTestMessage(
-        `Gemini test failed (no HTTP status, unknown): ${
-          error instanceof Error
-            ? error.message
-            : "Model access could not be verified."
-        }`,
-      );
-    } finally {
-      testingModel.current = false;
-      setIsTestingModel(false);
-    }
-  }
-
   return (
     <section className="chain-runner" aria-labelledby="run-chain-heading">
       <div className="chain-runner-heading">
@@ -209,7 +150,7 @@ export function PromptChainRunner({
         </label>
         <input
           accept="image/jpeg,image/png,image/webp"
-          disabled={isRunning || isTestingModel}
+          disabled={isRunning}
           id="chain-run-image"
           name="image"
           required={imageRequired}
@@ -220,34 +161,11 @@ export function PromptChainRunner({
         </p>
         <button
           className="primary-button run-chain-button"
-          disabled={isRunning || isTestingModel}
+          disabled={isRunning}
         >
           {isRunning ? "Running chain..." : "Run Chain"}
         </button>
       </form>
-      <div className="model-access-test">
-        <button
-          className="secondary-button"
-          disabled={isRunning || isTestingModel}
-          onClick={handleTestModel}
-          type="button"
-        >
-          {isTestingModel ? "Testing model..." : "Test First Step Model"}
-        </button>
-        <p>
-          Sends one short request to the model configured for the first step.
-          This uses Gemini quota.
-        </p>
-      </div>
-      {modelTestMessage && (
-        <p
-          className={`chain-notice ${modelTestError ? "notice-error" : "notice-success"}`}
-          role={modelTestError ? "alert" : "status"}
-        >
-          <span aria-hidden="true">{modelTestError ? "!" : "✓"}</span>
-          {modelTestMessage}
-        </p>
-      )}
 
       {(isRunning || isComplete) && (
         <p
