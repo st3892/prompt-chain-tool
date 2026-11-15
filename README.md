@@ -15,6 +15,20 @@ existing Supabase Auth account. Accounts without `is_superadmin = true` are
 sent to the Access Denied page. The dashboard's Log out button ends the
 Supabase session.
 
+On the dashboard, select a prompt-chain card to open its detail page. The
+detail page shows its steps in order and provides controls to add, edit, delete,
+and reorder them. Use **Back to All Chains** to return to the dashboard.
+
+On a chain detail page, use **Run Chain** to execute its steps in order. The
+“Funny Image Captions” chain requires a JPEG, PNG, or WebP image up to 10 MB.
+Gemini requests run on the server and use each step's active `llm_models`
+record. Intermediate and final outputs are streamed to the page and saved as
+generation history. Uploaded image contents are not stored. Temporary HTTP
+503/504 errors get at most two retries with exponential backoff; completed
+steps are not repeated during those retries. **Test First Step Model** sends
+one short Gemini request to verify access to the first step's configured model
+and uses quota.
+
 ## Google OAuth configuration
 
 Enable Google as a provider in Supabase Authentication and configure the
@@ -60,6 +74,60 @@ RLS-scoped Supabase session. Creating a step requires at least one visible,
 active model because `llm_model_id` references `llm_models`; no model records
 are created automatically. If RLS prevents an operation, the interface shows
 the database error and the corresponding policy requirement.
+The step editor displays a temperature input only when the selected model has
+`supports_temperature = true`; otherwise it leaves the existing temperature
+unchanged and omits that field from the mutation.
+
+## Gemini execution
+
+Set `GEMINI_API_KEY` in the local server environment (for example, in the
+ignored `.env.local` file) and in Vercel's server-side environment variables for
+the environments where you run the app. Do not prefix it with `NEXT_PUBLIC_`.
+No changes are needed to the `generations` or `prompt_chain_mixes` tables.
+Persistent chain history writes to `generation_requests` and `llm_responses`.
+Execution status uses the application-defined values `running`, `completed`,
+`failed`, and `cancelled`; the database has no status check constraint.
+Apply the following policies manually in Supabase; the application does not
+change RLS policies:
+
+```sql
+CREATE POLICY "Superadmins can insert owned generation requests"
+ON public.generation_requests
+FOR INSERT
+TO authenticated
+WITH CHECK (
+  user_id = auth.uid()
+  AND public.is_superadmin()
+);
+
+CREATE POLICY "Superadmins can update owned generation requests"
+ON public.generation_requests
+FOR UPDATE
+TO authenticated
+USING (
+  user_id = auth.uid()
+  AND public.is_superadmin()
+)
+WITH CHECK (
+  user_id = auth.uid()
+  AND public.is_superadmin()
+);
+
+CREATE POLICY "Superadmins can insert responses for owned requests"
+ON public.llm_responses
+FOR INSERT
+TO authenticated
+WITH CHECK (
+  public.is_superadmin()
+  AND generation_request_id IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM public.generation_requests AS request
+    WHERE request.id = generation_request_id
+      AND request.user_id = auth.uid()
+  )
+);
+```
 
 Run the project checks with:
 

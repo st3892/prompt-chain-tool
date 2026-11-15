@@ -12,17 +12,20 @@ import type { PromptChain } from "@/lib/prompt-chains";
 import type { LlmModel, PromptChainStep } from "@/lib/prompt-chain-steps";
 
 export function PromptChainStepsManager({
-  chains,
+  chain,
+  initialSteps,
   models,
+  stepsLoadError,
   modelsLoadError,
 }: {
-  chains: PromptChain[];
+  chain: PromptChain;
+  initialSteps: PromptChainStep[];
   models: LlmModel[];
+  stepsLoadError: string | null;
   modelsLoadError: string | null;
 }) {
-  const [selectedChainId, setSelectedChainId] = useState("");
-  const [steps, setSteps] = useState<PromptChainStep[]>([]);
-  const [stepsError, setStepsError] = useState("");
+  const [steps, setSteps] = useState(initialSteps);
+  const [stepsError, setStepsError] = useState(stepsLoadError ?? "");
   const [notice, setNotice] = useState<{
     message: string;
     success: boolean;
@@ -31,36 +34,21 @@ export function PromptChainStepsManager({
   const [isCreating, setIsCreating] = useState(false);
   const [isPending, startTransition] = useTransition();
 
-  function chooseChain(chainId: string) {
-    setSelectedChainId(chainId);
-    setSteps([]);
-    setStepsError("");
-    setNotice(null);
-    setEditingStep(null);
-    setIsCreating(false);
-
-    if (!chainId) return;
-
-    startTransition(async () => {
-      const result = await getPromptChainSteps(chainId);
-      if (result.success) {
+  function reloadSteps() {
+    return getPromptChainSteps(chain.id)
+      .then((result) => {
+        if (!result.success) {
+          setStepsError(result.message);
+          return false;
+        }
         setSteps(result.steps ?? []);
-      } else {
-        setStepsError(result.message);
-      }
-    });
-  }
-
-  function reloadSteps(chainId: string) {
-    return getPromptChainSteps(chainId).then((result) => {
-      if (!result.success) {
-        setStepsError(result.message);
+        setStepsError("");
+        return true;
+      })
+      .catch(() => {
+        setStepsError("The latest step list could not be loaded. Refresh the page to try again.");
         return false;
-      }
-      setSteps(result.steps ?? []);
-      setStepsError("");
-      return true;
-    });
+      });
   }
 
   function openCreateForm() {
@@ -84,15 +72,28 @@ export function PromptChainStepsManager({
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const editing = editingStep;
-    const chainId = selectedChainId;
+    const chainId = chain.id;
 
     startTransition(async () => {
-      const result = editing
-        ? await updatePromptChainStep(chainId, editing.id, formData)
-        : await createPromptChainStep(chainId, formData);
+      let result: Awaited<ReturnType<typeof createPromptChainStep>>;
+      try {
+        result = editing
+          ? await updatePromptChainStep(chainId, editing.id, formData)
+          : await createPromptChainStep(chainId, formData);
+      } catch {
+        setNotice({
+          message: "The save could not be confirmed. Refresh the step list before trying again.",
+          success: false,
+        });
+        await reloadSteps();
+        return;
+      }
 
       setNotice({ message: result.message, success: result.success });
-      if (!result.success) return;
+      if (!result.success) {
+        await reloadSteps();
+        return;
+      }
 
       if (result.step) {
         setSteps((current) =>
@@ -118,9 +119,22 @@ export function PromptChainStepsManager({
 
     setNotice(null);
     startTransition(async () => {
-      const result = await deletePromptChainStep(selectedChainId, step.id);
+      let result: Awaited<ReturnType<typeof deletePromptChainStep>>;
+      try {
+        result = await deletePromptChainStep(chain.id, step.id);
+      } catch {
+        setNotice({
+          message: "The delete could not be confirmed. Refresh the step list to check its status.",
+          success: false,
+        });
+        await reloadSteps();
+        return;
+      }
       setNotice({ message: result.message, success: result.success });
-      if (!result.success) return;
+      if (!result.success) {
+        await reloadSteps();
+        return;
+      }
 
       setSteps((current) => current.filter((item) => item.id !== step.id));
       if (editingStep?.id === step.id) closeForm();
@@ -130,17 +144,28 @@ export function PromptChainStepsManager({
   function handleMove(step: PromptChainStep, direction: "up" | "down") {
     setNotice(null);
     startTransition(async () => {
-      const result = await movePromptChainStep(
-        selectedChainId,
-        step.id,
-        direction,
-      );
+      let result: Awaited<ReturnType<typeof movePromptChainStep>>;
+      try {
+        result = await movePromptChainStep(
+          chain.id,
+          step.id,
+          direction,
+        );
+      } catch {
+        await reloadSteps();
+        setNotice({
+          message: "The step move could not be confirmed. The latest order was reloaded.",
+          success: false,
+        });
+        return;
+      }
       if (!result.success) {
+        await reloadSteps();
         setNotice({ message: result.message, success: false });
         return;
       }
 
-      const refreshed = await reloadSteps(selectedChainId);
+      const refreshed = await reloadSteps();
       setNotice({
         message: refreshed
           ? result.message
@@ -154,47 +179,28 @@ export function PromptChainStepsManager({
     <section className="steps-section" aria-labelledby="steps-heading">
       <div className="steps-title">
         <div>
-          <p className="eyebrow">STEP BUILDER</p>
-          <h2 id="steps-heading">Prompt chain steps</h2>
+          <p className="eyebrow">RECIPE INSTRUCTIONS</p>
+          <h2 id="steps-heading">Steps in this chain</h2>
         </div>
       </div>
-
-      <label className="chain-select-label" htmlFor="selected-chain">
-        Select a prompt chain
-      </label>
-      <select
-        className="chain-select"
-        id="selected-chain"
-        onChange={(event) => chooseChain(event.target.value)}
-        value={selectedChainId}
-      >
-        <option value="">Choose a prompt chain...</option>
-        {chains.map((chain) => (
-          <option key={chain.id} value={chain.id}>
-            {chain.name}
-          </option>
-        ))}
-      </select>
-
-      {selectedChainId && (
-        <div className="steps-panel">
+      <div className="steps-panel">
           <div className="steps-panel-heading">
             <div>
-              <p className="eyebrow">ORDERED WORKFLOW</p>
-              <h3>
-                {chains.find((chain) => chain.id === selectedChainId)?.name}
-              </h3>
+              <p className="eyebrow">FOLLOW IN ORDER</p>
+              <h3>{chain.name}</h3>
             </div>
             <button
               className="primary-button create-step-button"
-              disabled={isPending || models.length === 0 || Boolean(modelsLoadError)}
+              disabled={
+                isPending || models.length === 0 || Boolean(modelsLoadError)
+              }
               onClick={openCreateForm}
               type="button"
             >
               <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
                 <path d="M10 4v12m6-6H4" />
               </svg>
-              Add step
+              Add instruction
             </button>
           </div>
 
@@ -258,8 +264,8 @@ export function PromptChainStepsManager({
                   <rect x="3.5" y="3.5" width="17" height="17" rx="3.5" />
                 </svg>
               </span>
-              <h3>No steps in this chain yet</h3>
-              <p>Add the first step to define what this chain should do.</p>
+              <h3>No instructions in this recipe yet</h3>
+              <p>Add the first step to define what this prompt chain should do.</p>
             </div>
           ) : (
             <div className="step-list">
@@ -332,7 +338,7 @@ export function PromptChainStepsManager({
                       </div>
                     </div>
                     <p className="step-template">{step.prompt_template}</p>
-                    {model?.supports_temperature && (
+                    {model?.supports_temperature === true && (
                       <span className="step-temperature">
                         Temperature: {step.temperature ?? "not set"}
                       </span>
@@ -340,10 +346,9 @@ export function PromptChainStepsManager({
                   </article>
                 );
               })}
-            </div>
+          </div>
           )}
         </div>
-      )}
     </section>
   );
 }
@@ -361,10 +366,12 @@ function StepEditor({
   onCancel: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const initialModelId =
-    models.find((model) => model.id === step?.llm_model_id)?.id ??
-    models[0]?.id ??
-    "";
+  const modelIsAvailable = models.some(
+    (model) => model.id === step?.llm_model_id,
+  );
+  const initialModelId = step
+    ? step.llm_model_id
+    : models[0]?.id ?? "";
   const [modelId, setModelId] = useState(initialModelId);
   const selectedModel = models.find((model) => model.id === modelId);
 
@@ -415,6 +422,11 @@ function StepEditor({
           required
           value={modelId}
         >
+          {step && !modelIsAvailable && (
+            <option value={step.llm_model_id}>
+              Current model unavailable (ID {step.llm_model_id})
+            </option>
+          )}
           {models.map((model) => (
             <option key={model.id} value={model.id}>
               {model.name}
@@ -427,7 +439,7 @@ function StepEditor({
           be kept while editing this step.
         </p>
       )}
-      {selectedModel?.supports_temperature && (
+      {selectedModel?.supports_temperature === true && (
         <>
           <label htmlFor="step-temperature">Temperature</label>
           <input

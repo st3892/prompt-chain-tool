@@ -2,25 +2,22 @@
 
 import { FormEvent, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   createPromptChain,
   deletePromptChain,
   updatePromptChain,
 } from "@/app/actions";
 import type { PromptChain } from "@/lib/prompt-chains";
-import type { LlmModel } from "@/lib/prompt-chain-steps";
-import { PromptChainStepsManager } from "@/components/prompt-chain-steps-manager";
+
+type ManagedPromptChain = PromptChain & { stepCount: number | null };
 
 export function PromptChainManager({
   initialChains,
   loadError,
-  models,
-  modelsLoadError,
 }: {
-  initialChains: PromptChain[];
+  initialChains: ManagedPromptChain[];
   loadError: string | null;
-  models: LlmModel[];
-  modelsLoadError: string | null;
 }) {
   const router = useRouter();
   const [chains, setChains] = useState(initialChains);
@@ -55,9 +52,19 @@ export function PromptChainManager({
     const formData = new FormData(form);
 
     startTransition(async () => {
-      const result = editingChain
-        ? await updatePromptChain(editingChain.id, formData)
-        : await createPromptChain(formData);
+      let result: Awaited<ReturnType<typeof createPromptChain>>;
+      try {
+        result = editingChain
+          ? await updatePromptChain(editingChain.id, formData)
+          : await createPromptChain(formData);
+      } catch {
+        setNotice({
+          message: "The save could not be confirmed. Refresh the page before trying again.",
+          success: false,
+        });
+        router.refresh();
+        return;
+      }
 
       setNotice({ message: result.message, success: result.success });
 
@@ -65,12 +72,20 @@ export function PromptChainManager({
 
       const savedChain = result.chain;
       if (savedChain) {
+        const savedChainWithCount: ManagedPromptChain = {
+          ...savedChain,
+          stepCount: editingChain
+            ? chains.find((chain) => chain.id === savedChain.id)?.stepCount ?? 0
+            : 0,
+        };
         setChains((currentChains) =>
           editingChain
             ? currentChains.map((chain) =>
-                chain.id === savedChain.id ? savedChain : chain,
+                chain.id === savedChainWithCount.id
+                  ? savedChainWithCount
+                  : chain,
               )
-            : [...currentChains, savedChain].sort((a, b) =>
+            : [...currentChains, savedChainWithCount].sort((a, b) =>
                 a.id.localeCompare(b.id, undefined, { numeric: true }),
               ),
         );
@@ -88,7 +103,17 @@ export function PromptChainManager({
 
     setNotice(null);
     startTransition(async () => {
-      const result = await deletePromptChain(chain.id);
+      let result: Awaited<ReturnType<typeof deletePromptChain>>;
+      try {
+        result = await deletePromptChain(chain.id);
+      } catch {
+        setNotice({
+          message: "The delete could not be confirmed. Refresh the page to check the recipe list.",
+          success: false,
+        });
+        router.refresh();
+        return;
+      }
       setNotice({ message: result.message, success: result.success });
 
       if (result.success) {
@@ -105,14 +130,14 @@ export function PromptChainManager({
     <section className="chains-section" aria-labelledby="chains-heading">
       <div className="chains-heading-row">
         <div>
-          <p className="eyebrow">YOUR LIBRARY</p>
-          <h2 id="chains-heading">Prompt chains</h2>
+          <p className="eyebrow">YOUR RECIPE BOX</p>
+          <h2 id="chains-heading">Prompt chains &amp; recipes</h2>
         </div>
         <button className="primary-button create-chain-button" onClick={openCreateForm}>
           <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
             <path d="M10 4v12m6-6H4" />
           </svg>
-          Create Prompt Chain
+          Create recipe
         </button>
       </div>
 
@@ -138,9 +163,9 @@ export function PromptChainManager({
               <div className="chain-editor-heading">
                 <div>
                   <p className="eyebrow">
-                    {editingChain ? "UPDATE DETAILS" : "NEW WORKSPACE ITEM"}
+                    {editingChain ? "EDIT RECIPE" : "A NEW RECIPE"}
                   </p>
-                  <h3>{editingChain ? "Edit prompt chain" : "Create prompt chain"}</h3>
+                  <h3>{editingChain ? "Edit prompt recipe" : "Create a prompt recipe"}</h3>
                 </div>
                 <button
                   aria-label="Close form"
@@ -160,7 +185,7 @@ export function PromptChainManager({
                 id="chain-name"
                 maxLength={200}
                 name="name"
-                placeholder="e.g. Product description writer"
+                placeholder="e.g. Funny image captions"
                 required
               />
               <label htmlFor="chain-description">Description</label>
@@ -168,7 +193,7 @@ export function PromptChainManager({
                 defaultValue={editingChain?.description ?? ""}
                 id="chain-description"
                 name="description"
-                placeholder="What does this prompt chain help you do?"
+                placeholder="What will this recipe help you make?"
                 rows={3}
               />
               <div className="chain-editor-actions">
@@ -185,7 +210,7 @@ export function PromptChainManager({
                     ? "Saving..."
                     : editingChain
                       ? "Save changes"
-                      : "Create chain"}
+                      : "Create recipe"}
                 </button>
               </div>
             </form>
@@ -199,24 +224,43 @@ export function PromptChainManager({
                   <rect x="3.5" y="3.5" width="17" height="17" rx="3.5" />
                 </svg>
               </span>
-              <h3>No prompt chains yet</h3>
-              <p>Create your first chain to get started. You can add prompts and steps later.</p>
+              <h3>Your recipe box is empty</h3>
+              <p>Create your first prompt recipe, then add its instructions and AI model.</p>
               <button className="secondary-create-button" onClick={openCreateForm}>
-                Create your first chain
+                Create your first recipe
               </button>
             </div>
           ) : (
-            <div className="chain-list">
+            <div className="chain-card-grid">
               {chains.map((chain, index) => (
-                <article className="chain-item" key={chain.id}>
-                  <span className="chain-number">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <div className="chain-details">
-                    <h3>{chain.name || "Untitled prompt chain"}</h3>
-                    <p>{chain.description || "No description provided."}</p>
-                  </div>
-                  <div className="chain-item-actions">
+                <article className="chain-card" key={chain.id}>
+                  <Link
+                    className="chain-card-link"
+                    href={`/dashboard/chains/${chain.id}`}
+                    aria-label={`Open ${chain.name}`}
+                  >
+                    <span className="chain-number">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <div className="chain-details">
+                      <h3>{chain.name || "Untitled prompt chain"}</h3>
+                      <p>{chain.description || "No description provided."}</p>
+                      <span className="chain-step-count">
+                        {chain.stepCount === null
+                          ? "Step count unavailable"
+                          : `${chain.stepCount} ${chain.stepCount === 1 ? "instruction" : "instructions"}`}
+                      </span>
+                    </div>
+                    <svg
+                      aria-hidden="true"
+                      className="chain-card-arrow"
+                      viewBox="0 0 20 20"
+                      fill="none"
+                    >
+                      <path d="M4 10h12m-5-5 5 5-5 5" />
+                    </svg>
+                  </Link>
+                  <div className="chain-card-actions">
                     <button
                       aria-label={`Edit ${chain.name}`}
                       className="icon-button"
@@ -243,13 +287,6 @@ export function PromptChainManager({
                 </article>
               ))}
             </div>
-          )}
-          {chains.length > 0 && (
-            <PromptChainStepsManager
-              chains={chains}
-              models={models}
-              modelsLoadError={modelsLoadError}
-            />
           )}
         </>
       )}

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 
 export function AccessDenied({
   message = "Your account does not have permission to access the admin dashboard.",
@@ -8,6 +9,9 @@ export function AccessDenied({
   return (
     <main className="message-shell">
       <section className="message-card">
+        <div className="message-theme-control">
+          <ThemeSwitcher />
+        </div>
         <span className="message-icon denied-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M12 8v4m0 4h.01" />

@@ -4,6 +4,8 @@ import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { ThemeSwitcher } from "@/components/theme-switcher";
+import { BakeryMark } from "@/components/bakery-mark";
 
 export function LoginForm({ oauthError = false }: { oauthError?: boolean }) {
   const router = useRouter();
@@ -69,22 +71,21 @@ export function LoginForm({ oauthError = false }: { oauthError?: boolean }) {
       <div className="login-orbit login-orbit-one" aria-hidden="true" />
       <div className="login-orbit login-orbit-two" aria-hidden="true" />
       <section className="login-panel">
-        <Link className="brand-lockup" href="/" aria-label="Prompt Chain Tool home">
-          <span className="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 32 32" fill="none">
-              <path d="M7 9h12a5 5 0 0 1 0 10h-2" />
-              <path d="m13 15 4 4-4 4" />
-              <path d="M25 23H13a5 5 0 0 1 0-10h2" />
-              <path d="m19 17-4-4 4-4" />
-            </svg>
-          </span>
-          <span>Prompt Chain Tool</span>
-        </Link>
+        <div className="login-topline">
+          <Link className="brand-lockup" href="/" aria-label="Prompt Chain Tool home">
+            <BakeryMark />
+            <span className="brand-copy">
+              <strong>Whisk Takers</strong>
+              <small>Prompt Chain Tool</small>
+            </span>
+          </Link>
+          <ThemeSwitcher />
+        </div>
 
         <div className="login-intro">
-          <p className="eyebrow">ADMINISTRATION</p>
+          <p className="eyebrow">WELCOME TO THE KITCHEN</p>
           <h1>Welcome back</h1>
-          <p>Sign in to manage your Prompt Chain Tool workspace.</p>
+          <p>Sign in to prepare and manage your prompt-chain recipes.</p>
         </div>
 
         <button
@@ -178,7 +179,7 @@ export function LoginForm({ oauthError = false }: { oauthError?: boolean }) {
           Secure sign-in for authorized administrators
         </p>
       </section>
-      <p className="login-copyright">A focused space for building better prompts.</p>
+      <p className="login-copyright">Mixing better prompts, one recipe at a time.</p>
     </main>
   );
 }

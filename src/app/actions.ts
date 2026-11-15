@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PromptChain } from "@/lib/prompt-chains";
@@ -145,6 +146,59 @@ async function getActiveModel(
     .maybeSingle();
 }
 
+async function normalizeStepOrders(
+  supabase: SupabaseClient,
+  chainId: string,
+): Promise<
+  | { success: true; stepOrders: Map<string, number> }
+  | { success: false; message: string }
+> {
+  const { data: rows, error: loadError } = await supabase
+    .from("prompt_chain_steps")
+    .select("id, step_order")
+    .eq("prompt_chain_id", chainId)
+    .order("step_order", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (loadError) {
+    console.error("Unable to load steps while normalizing order.", loadError);
+    return {
+      success: false,
+      message: getDatabaseErrorMessage(loadError, "prompt_chain_steps"),
+    };
+  }
+
+  // Renumber in display order so deletes and moves leave no order gaps.
+  const stepOrders = new Map<string, number>();
+  for (const [index, row] of rows.entries()) {
+    const stepOrder = index + 1;
+    stepOrders.set(String(row.id), stepOrder);
+    if (row.step_order === stepOrder) continue;
+
+    const { data, error } = await supabase
+      .from("prompt_chain_steps")
+      .update({ step_order: stepOrder })
+      .eq("id", row.id)
+      .eq("prompt_chain_id", chainId)
+      .select("id")
+      .maybeSingle();
+
+    if (error || !data) {
+      if (error) {
+        console.error("Unable to normalize prompt-chain step order.", error);
+      }
+      return {
+        success: false,
+        message: error
+          ? getDatabaseErrorMessage(error, "prompt_chain_steps")
+          : "Step order could not be updated under the current RLS policies.",
+      };
+    }
+  }
+
+  return { success: true, stepOrders };
+}
+
 export async function getPromptChainSteps(
   chainId: string,
 ): Promise<PromptChainStepActionResult> {
@@ -233,7 +287,8 @@ export async function createPromptChainStep(
     name: fields.fields.name,
     prompt_template: fields.fields.prompt_template,
     llm_model_id: fields.fields.llm_model_id,
-    temperature: model.supports_temperature ? fields.fields.temperature : 0,
+    temperature:
+      model.supports_temperature === true ? fields.fields.temperature : null,
   };
   const { data, error } = await authorization.supabase
     .from("prompt_chain_steps")
@@ -249,10 +304,28 @@ export async function createPromptChainStep(
     };
   }
 
+  const orderResult = await normalizeStepOrders(
+    authorization.supabase,
+    parsedChainId,
+  );
+  if (!orderResult.success) {
+    return {
+      success: false,
+      message: `The step was created, but its order could not be normalized. ${orderResult.message}`,
+    };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/chains/${parsedChainId}`);
+
   return {
     success: true,
     message: "Step created successfully.",
-    step: mapPromptChainStep(data),
+    step: mapPromptChainStep({
+      ...data,
+      step_order:
+        orderResult.stepOrders.get(String(data.id)) ?? data.step_order,
+    }),
   };
 }
 
@@ -277,13 +350,39 @@ export async function updatePromptChainStep(
 
   const updateFields: StepContentFields & {
     llm_model_id?: string;
-    temperature?: number;
+    temperature?: number | null;
   } = {
     name: fields.fields.name,
     prompt_template: fields.fields.prompt_template,
   };
 
   if ("llm_model_id" in fields.fields) {
+    const { data: existingStep, error: existingStepError } =
+      await authorization.supabase
+        .from("prompt_chain_steps")
+        .select("llm_model_id")
+        .eq("id", parsedStepId)
+        .eq("prompt_chain_id", parsedChainId)
+        .maybeSingle();
+
+    if (existingStepError) {
+      console.error("Unable to load the existing step model.", existingStepError);
+      return {
+        success: false,
+        message: getDatabaseErrorMessage(
+          existingStepError,
+          "prompt_chain_steps",
+        ),
+      };
+    }
+    if (!existingStep) {
+      return {
+        success: false,
+        message:
+          "Step not found, or it is not available under the current RLS policies.",
+      };
+    }
+
     const { data: model, error: modelError } = await getActiveModel(
       authorization.supabase,
       fields.fields.llm_model_id,
@@ -295,17 +394,23 @@ export async function updatePromptChainStep(
         message: getDatabaseErrorMessage(modelError, "llm_models"),
       };
     }
-    if (!model) {
+    const isUnchangedUnavailableModel =
+      String(existingStep.llm_model_id) === fields.fields.llm_model_id &&
+      !model;
+    if (!model && !isUnchangedUnavailableModel) {
       return {
         success: false,
         message: "That AI model is not active or is not available to your account.",
       };
     }
 
-    updateFields.llm_model_id = fields.fields.llm_model_id;
-    updateFields.temperature = model.supports_temperature
-      ? fields.fields.temperature
-      : 0;
+    if (!isUnchangedUnavailableModel) {
+      updateFields.llm_model_id = fields.fields.llm_model_id;
+      updateFields.temperature =
+        model?.supports_temperature === true
+          ? fields.fields.temperature
+          : null;
+    }
   }
 
   const { data, error } = await authorization.supabase
@@ -371,6 +476,20 @@ export async function deletePromptChainStep(
       message: "Step not found, or it is not available under the current RLS policies.",
     };
   }
+
+  const orderResult = await normalizeStepOrders(
+    authorization.supabase,
+    parsedChainId,
+  );
+  if (!orderResult.success) {
+    return {
+      success: false,
+      message: `The step was deleted, but the remaining steps could not be renumbered. ${orderResult.message}`,
+    };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/chains/${parsedChainId}`);
 
   return { success: true, message: "Step deleted successfully." };
 }
@@ -499,6 +618,17 @@ export async function movePromptChainStep(
       message: error
         ? getDatabaseErrorMessage(error, "prompt_chain_steps")
         : "The step could not be updated under the current RLS policies.",
+    };
+  }
+
+  const orderResult = await normalizeStepOrders(
+    authorization.supabase,
+    parsedChainId,
+  );
+  if (!orderResult.success) {
+    return {
+      success: false,
+      message: `The move was applied, but the step order could not be normalized. ${orderResult.message}`,
     };
   }
 

@@ -41,7 +41,7 @@ export async function getSuperadminClient() {
     } as const;
   }
 
-  return { authorized: true, supabase } as const;
+  return { authorized: true, supabase, user } as const;
 }
 
 export function getDatabaseErrorMessage(
